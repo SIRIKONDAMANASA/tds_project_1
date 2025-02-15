@@ -41,24 +41,23 @@ import re
 from PIL import Image
 dotenv.load_dotenv()
 
-API_KEY = os.getenv("OPEN_AI_PROXY_TOKEN")
-URL_CHAT = os.getenv("OPEN_AI_PROXY_URL")
-URL_EMBEDDING = os.getenv("OPEN_AI_EMBEDDING_URL")
+API_KEY = os.getenv("AIPROXY_TOKEN")
+URL_CHAT = "http://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+URL_EMBEDDING = "http://aiproxy.sanand.workers.dev/openai/v1/embeddings"
 RUNNING_IN_CODESPACES = "CODESPACES" in os.environ
 RUNNING_IN_DOCKER = os.path.exists("/.dockerenv")
 logging.basicConfig(level=logging.INFO)
 
-def ensure_local_path(path: str) -> str:
+def verify_path_location(path: str) -> str:
     """Ensure the path uses './data/...' locally, but '/data/...' in Docker."""
     if ((not RUNNING_IN_CODESPACES) and RUNNING_IN_DOCKER): 
-        print("IN HERE",RUNNING_IN_DOCKER) # If absolute Docker path, return as-is :  # If absolute Docker path, return as-is
+        print("PATH VERIFICATION IN PROGRESS", RUNNING_IN_DOCKER)
         return path
-    
     else:
-        logging.info(f"Inside ensure_local_path generate_schema with path: {path}")
+        logging.info(f"Path verification completed for: {path}")
         return path.lstrip("/")    
 
-def convert_function_to_openai_schema(func: Callable) -> dict:
+def transform_function_to_schema(func: Callable) -> dict:
     """
     Converts a Python function into an OpenAI function schema with strict JSON schema enforcement.
 
@@ -123,26 +122,52 @@ def convert_function_to_openai_schema(func: Callable) -> dict:
     
     return openai_function_schema
  
-def format_file_with_prettier(file_path: str, prettier_version: str):
+def beautify_code_file(file_path: str, prettier_version: str):
     """
     Format the contents of a specified file using a particular formatting tool, ensuring the file is updated in-place.
     Args:
         file_path: The path to the file to format.  
         prettier_version: The version of Prettier to use.
     """
-    input_file_path = ensure_local_path(file_path)
+    input_file_path = verify_path_location(file_path)
+    
+    logging.info(f"Attempting to format file: {input_file_path}")
     
     try:
-        subprocess.run(["npx", "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        raise RuntimeError("npx not found. Please install Node.js and npm first: https://nodejs.org/")
+        # Check if npx is available
+        result = subprocess.run(["npx", "--version"], 
+                              capture_output=True, 
+                              text=True,
+                              shell=True)  # Add shell=True for Windows
+        logging.info(f"npx version check output: {result.stdout}")
+        if result.stderr:
+            logging.warning(f"npx version check stderr: {result.stderr}")
+            
+        # Run prettier with detailed logging
+        format_result = subprocess.run(
+            ["npx", f"prettier@{prettier_version}", "--write", input_file_path],
+            capture_output=True,
+            text=True,
+            shell=True  # Add shell=True for Windows
+        )
         
-    try:
-        subprocess.run(["npx", f"prettier@{prettier_version}", "--write", input_file_path], check=True)
+        logging.info(f"Prettier output: {format_result.stdout}")
+        if format_result.stderr:
+            logging.warning(f"Prettier stderr: {format_result.stderr}")
+            
+        format_result.check_returncode()  # Will raise CalledProcessError if command failed
+        
+        logging.info("File formatting completed successfully")
+        
     except subprocess.CalledProcessError as e:
+        logging.error(f"Command failed with return code {e.returncode}")
+        logging.error(f"Command output: {e.output if hasattr(e, 'output') else 'No output'}")
         raise RuntimeError(f"Error running prettier: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error: {str(e)}")
+        raise RuntimeError(f"Unexpected error while formatting: {str(e)}")
 
-def query_gpt(user_input: str,task: str):
+def interact_with_gpt(user_input: str, task: str):
     response = requests.post(
         URL_CHAT,
         headers={"Authorization": f"Bearer {API_KEY}",
@@ -153,13 +178,13 @@ def query_gpt(user_input: str,task: str):
                         {'role': 'user', 'content': user_input}]
         }
     )
-    logging.info("PRINTING RESPONSE:::"*3)
-    print("Inside query_gpt")
-    logging.info("PRINTING RESPONSE:::"*3)
+    logging.info("GPT INTERACTION COMPLETED"*3)
+    print("GPT interaction successful")
+    logging.info("RESPONSE RECEIVED"*3)
     response.raise_for_status()
     return response.json()
 
-def rewrite_sensitive_task(task: str) -> str:
+def sanitize_sensitive_task(task: str) -> str:
     """Rewrite sensitive task descriptions in an indirect way."""
     task_lower = task.lower()
     
@@ -182,10 +207,10 @@ def rewrite_sensitive_task(task: str) -> str:
     return task
 
 
-def query_gpt_image(image_path: str, task: str):
-    logging.info(f"Inside query_gpt_image with image_path: {image_path} and task: {task}")
+def process_image_with_gpt(image_path: str, task: str):
+    logging.info(f"Processing image at: {image_path} with task: {task}")
     image_format = image_path.split(".")[-1]
-    clean_task = rewrite_sensitive_task(task)
+    clean_task = sanitize_sensitive_task(task)
     with open(image_path, "rb") as file:
         base64_image = base64.b64encode(file.read()).decode("utf-8")
     response = requests.post(
@@ -215,7 +240,7 @@ def query_gpt_image(image_path: str, task: str):
 """"
 A TASKS
 """
-def query_database(db_file: str, output_file: str, query: str, query_params: Tuple):
+def execute_db_operation(db_file: str, output_file: str, query: str, query_params: Tuple):
     """
     Executes a SQL query on the specified SQLite database and writes the result to an output file.
 
@@ -228,8 +253,8 @@ def query_database(db_file: str, output_file: str, query: str, query_params: Tup
     Returns:
         None
     """
-    db_file_path = ensure_local_path(db_file)
-    output_file_path = ensure_local_path(output_file)
+    db_file_path = verify_path_location(db_file)
+    output_file_path = verify_path_location(output_file)
 
     conn = sqlite3.connect(db_file_path)
     cursor = conn.cursor()
@@ -252,7 +277,7 @@ def query_database(db_file: str, output_file: str, query: str, query_params: Tup
 
     finally:
         conn.close()
-def extract_specific_text_using_llm(input_file: str, output_file: str, task: str):
+def process_text_with_ai(input_file: str, output_file: str, task: str):
     """
     Extracts specific text from a file using an LLM and writes it to an output file.
 
@@ -263,15 +288,15 @@ def extract_specific_text_using_llm(input_file: str, output_file: str, task: str
     Returns:
         None
     """
-    input_file_path = ensure_local_path(input_file)
+    input_file_path = verify_path_location(input_file)
     with open(input_file_path, "r") as file:
         text_info = file.read() #readlines gives list, this gives string
-    output_file_path = ensure_local_path(output_file)
-    response = query_gpt(text_info, task) # recieved in json format
-    logging.info(f"Inside extract_specific_text_using_llm with input_file: {input_file}, output_file: {output_file}, and task: {task}")
+    output_file_path = verify_path_location(output_file)
+    response = interact_with_gpt(text_info, task) # recieved in json format
+    logging.info(f"Inside process_text_with_ai with input_file: {input_file}, output_file: {output_file}, and task: {task}")
     with open(output_file_path, "w") as file:
         file.write(response["choices"][0]["message"]["content"])
-def get_embeddings(texts: List[str]):
+def compute_text_embeddings(texts: str):
     response =  requests.post(
             URL_EMBEDDING,
             headers={"Authorization": f"Bearer {API_KEY}"},
@@ -290,8 +315,8 @@ def get_similar_text_using_embeddings(input_file: str, output_file: str, no_of_s
     Returns:
         None
     """
-    input_file_path = ensure_local_path(input_file)
-    output_file_path = ensure_local_path(output_file)
+    input_file_path = verify_path_location(input_file)
+    output_file_path = verify_path_location(output_file)
 
 
     with open(input_file_path, "r") as file:
@@ -299,7 +324,7 @@ def get_similar_text_using_embeddings(input_file: str, output_file: str, no_of_s
     
     documents = [comment.strip() for comment in documents]
     
-    line_embeddings = get_embeddings(documents)
+    line_embeddings = compute_text_embeddings(documents)
     similarity_matrix = cosine_similarity(line_embeddings)
     
     np.fill_diagonal(similarity_matrix, -1)  # Ignore self-similarity
@@ -312,7 +337,7 @@ def get_similar_text_using_embeddings(input_file: str, output_file: str, no_of_s
     with open(output_file_path, "w") as file:
         for text in similar_texts:
             file.write(text + "\n")
-def extract_text_from_image(image_path: str, output_file: str, task: str):
+def extract_image_data(image_path: str, output_file: str, task: str):
     """
     Extract text from image.
     Args:
@@ -324,15 +349,15 @@ def extract_text_from_image(image_path: str, output_file: str, task: str):
     """
     # Use an LLM to extract the credit card number
     # response = llm.extract_credit_card_number(image_path)
-    image_path___ = ensure_local_path(image_path)
-    response = query_gpt_image(image_path___, task)
+    image_path___ = verify_path_location(image_path)
+    response = process_image_with_gpt(image_path___, task)
     
-    output_file_path = ensure_local_path(output_file) 
+    output_file_path = verify_path_location(output_file) 
     # Remove spaces and write the result to the output file
     print(response["choices"][0]["message"])
     with open(output_file_path, "w") as file:
         file.write(response["choices"][0]["message"]["content"].replace(" ", ""))       
-def extract_specific_content_and_create_index(input_file: str, output_file: str, extension: str,content_marker: str):
+def build_content_index(input_file: str, output_file: str, extension: str, content_marker: str):
     """
     Identify all files with a specific extension in a directory.For each file, extract particular content (e.g., the first occurrence of a header) and create an index file mapping filenames to their extracted content.
     
@@ -342,8 +367,8 @@ def extract_specific_content_and_create_index(input_file: str, output_file: str,
         extension (str): The file extension to filter files.
         content_marker (str): The content marker to extract from each file.
     """
-    input_file_path = ensure_local_path(input_file)
-    output_file_path = ensure_local_path(output_file)
+    input_file_path = verify_path_location(input_file)
+    output_file_path = verify_path_location(output_file)
 
     extenstion_files = glob.glob(os.path.join(input_file_path, "**", f"*{extension}"), recursive=True)
     
@@ -363,7 +388,7 @@ def extract_specific_content_and_create_index(input_file: str, output_file: str,
 
     with open(output_file_path, "w", encoding="utf-8") as json_file:
         json.dump(index, json_file, indent=2, sort_keys=True)
-def process_and_write_logfiles(input_file: str, output_file: str, num_logs: int = 10, num_of_lines: int = 1):
+def parse_log_files(input_file: str, output_file: str, num_logs: int = 10, num_of_lines: int = 1):
     """
     Process n number of log files num_logs given in the input_file and write x number of lines num_of_lines  of each log file to the output_file.
     
@@ -374,8 +399,8 @@ def process_and_write_logfiles(input_file: str, output_file: str, num_logs: int 
         num_of_lines (int): The number of lines to extract from each log file.
 
     """
-    input_file_path = ensure_local_path(input_file)
-    output_file_path = ensure_local_path(output_file) 
+    input_file_path = verify_path_location(input_file)
+    output_file_path = verify_path_location(output_file) 
     log_files = glob.glob(os.path.join(input_file_path, "*.log"))
     
     log_files.sort(key=os.path.getmtime, reverse=True)
@@ -393,7 +418,7 @@ def process_and_write_logfiles(input_file: str, output_file: str, num_logs: int 
                         outfile.write(line)
                     else:
                         break
-def sort_json_by_keys(input_file: str, output_file: str, keys: list):
+def sort_json_content(input_file: str, output_file: str, keys: list):
     """
     Sort JSON data by specified keys in specified order and write the result to an output file.
     Args:
@@ -401,8 +426,8 @@ def sort_json_by_keys(input_file: str, output_file: str, keys: list):
         output_file (str): The path to the output JSON file.
         keys (list): The keys to sort the JSON data by.
     """
-    input_file_path = ensure_local_path(input_file)
-    output_file_path = ensure_local_path(output_file) 
+    input_file_path = verify_path_location(input_file)
+    output_file_path = verify_path_location(output_file) 
     with open(input_file_path, "r") as file:
         data = json.load(file)
     
@@ -410,13 +435,8 @@ def sort_json_by_keys(input_file: str, output_file: str, keys: list):
     
     with open(output_file_path, "w") as file:
         json.dump(sorted_data, file)                       
-def count_occurrences(
-    input_file: str,
-    output_file: str,
-    date_component: Optional[str] = None,
-    target_value: Optional[int] = None,
-    custom_pattern: Optional[str] = None
-):
+def analyze_text_patterns(input_file: str, output_file: str, date_component: Optional[str] = None,
+    target_value: Optional[int] = None, custom_pattern: Optional[str] = None):
     """
     Count occurrences of specific date components or custom patterns in a file and write the count to an output file. Handles various date formats automatically.
     Args:
@@ -427,8 +447,8 @@ def count_occurrences(
         custom_pattern (Optional[str]): A regex pattern to search for in each line.
     """  
     count = 0
-    input_file_path = ensure_local_path(input_file)
-    output_file_path = ensure_local_path(output_file)
+    input_file_path = verify_path_location(input_file)
+    output_file_path = verify_path_location(output_file)
     with open(input_file_path, "r") as file:
         for line in file:
             line = line.strip()
@@ -460,7 +480,7 @@ def count_occurrences(
     # Write the result to the output file
     with open(output_file_path, "w") as file:
         file.write(str(count))
-def install_and_run_script(package: str, args: list,*,script_url: str):
+def deploy_script_package(package: str, args: list, *, script_url: str):
     """
     Install a package and download a script from a URL with provided arguments and run it with uv run {pythonfile}.py.PLEASE be cautious and Note this generally used in the starting.ONLY use this tool function if url is given with https//.... or it says 'download'. If no conditions are met, please try the other functions.
     Args:
@@ -482,7 +502,7 @@ ADD generated response to double check dynamically
 """
 
 # Fetch data from an API and save it
-def fetch_data_from_api_and_save(url: str, output_file: str, generated_prompt: str, params: Optional[Dict[str, Any]] = None):
+def fetch_api_content(url: str, output_file: str, generated_prompt: str, params: Optional[Dict[str, Any]] = None):
     """
     Fetches data from an API using GET/POST requests and saves the response to a JSON file.
 
@@ -498,7 +518,7 @@ def fetch_data_from_api_and_save(url: str, output_file: str, generated_prompt: s
             For GET requests, use query params directly.
             For POST requests, include headers and data.
     """
-    output_file_path = ensure_local_path(output_file)
+    output_file_path = verify_path_location(output_file)
     
     try:
         if params and "headers" in params and "data" in params:
@@ -519,7 +539,7 @@ def fetch_data_from_api_and_save(url: str, output_file: str, generated_prompt: s
         raise
 
 #Clone a git repo and make a commit
-def clone_git_repo_and_commit(repo_url: str, output_dir: str, commit_message: str):
+def handle_git_ops(repo_url: str, output_dir: str, commit_message: str):
     """
     This tool function clones a Git repository from the specified URL and makes a commit with the provided message.
     Args:
@@ -535,7 +555,7 @@ def clone_git_repo_and_commit(repo_url: str, output_dir: str, commit_message: st
         print(f"An error occurred: {e}")
 
 #Run a SQL query on a SQLite or DuckDB database
-def run_sql_query_on_database(database_file: str, query: str, output_file: str, is_sqlite: bool = True):
+def execute_sql_operation(database_file: str, query: str, output_file: str, is_sqlite: bool = True):
     """
     This tool function executes a SQL query on a SQLite or DuckDB database and writes the result to an output file.
     Args:
@@ -572,30 +592,30 @@ def run_sql_query_on_database(database_file: str, query: str, output_file: str, 
             conn.close()
 
 #Extract data from (i.e. scrape) a website
-def scrape_webpage(url: str, output_file: str):
+def scrape_web_content(url: str, output_file: str):
     response = requests.get(url,verify=False)
     soup = BeautifulSoup(response.text, "html.parser")
     with open(output_file, "w") as file:
         file.write(soup.prettify())
 #Compress or resize an image
-def compress_image(input_file: str, output_file: str, quality: int = 50):
+def resize_image_file(input_file: str, output_file: str, quality: int = 50):
     img = Image.open(input_file)
     img.save(output_file, quality=quality)
 
 #Transcribe audio from an MP3 file
-def transcribe_audio(input_file: str, output_file: str):
+def convert_audio_text(input_file: str, output_file: str):
     transcript = "Transcribed text"  # Placeholder
     with open(output_file, "w") as file:
         file.write(transcript)
 #Convert Markdown to HTML
-def convert_markdown_to_html(input_file: str, output_file: str):
+def convert_md_format(input_file: str, output_file: str):
     with open(input_file, "r") as file:
         html = markdown.markdown(file.read())
     with open(output_file, "w") as file:
         file.write(html)
 
 #Write an API endpoint that filters a CSV file and returns JSON data
-def filter_csv(input_file: str, column: str, value: str, output_file: str):
+def filter_csv_content(input_file: str, column: str, value: str, output_file: str):
     results = []
     with open(input_file, newline="") as csvfile:
         reader = csv.DictReader(csvfile)
