@@ -1,19 +1,3 @@
-# /// script
-# dependencies = [
-#   "python-dotenv",
-#   "beautifulsoup4",
-#   "markdown",
-#   "requests<3",
-#   "duckdb",
-#   "numpy",
-#   "python-dateutil",
-#   "docstring-parser",
-#   "httpx",
-#   "scikit-learn",
-#   "pydantic",
-# ]
-# ///
-
 import dotenv
 import logging
 import subprocess
