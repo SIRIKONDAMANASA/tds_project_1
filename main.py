@@ -27,36 +27,35 @@ import os
 import logging
 from typing import Dict, Callable
 from tasks import (
-format_file_with_prettier,
-convert_function_to_openai_schema,
-query_gpt,
-query_gpt_image, 
-query_database, 
-extract_specific_text_using_llm, 
-get_embeddings, 
-get_similar_text_using_embeddings, 
-extract_text_from_image, 
-extract_specific_content_and_create_index, 
-process_and_write_logfiles, 
-sort_json_by_keys, 
-count_occurrences,
-install_and_run_script,
-clone_git_repo_and_commit,
-scrape_webpage,
-convert_markdown_to_html,
-fetch_data_from_api_and_save,
-filter_csv,
-transcribe_audio,
-compress_image,
-run_sql_query_on_database
+    beautify_code_file,
+    transform_function_to_schema,
+    interact_with_gpt,
+    process_image_with_gpt,
+    execute_db_operation,
+    process_text_with_ai,
+    compute_text_embeddings,
+    extract_image_data,
+    build_content_index,
+    parse_log_files,
+    sort_json_content,
+    analyze_text_patterns,
+    deploy_script_package,
+    handle_git_ops,
+    scrape_web_content,
+    convert_md_format,
+    fetch_api_content,
+    filter_csv_content,
+    convert_audio_text,
+    resize_image_file,
+    execute_sql_operation,
+    verify_path_location
 )
 
 
 load_dotenv()
-API_KEY = os.getenv("OPEN_AI_PROXY_TOKEN")
-URL_CHAT = os.getenv("OPEN_AI_PROXY_URL")
-URL_EMBEDDING = os.getenv("OPEN_AI_EMBEDDING_URL")
-
+API_KEY = os.getenv("AIPROXY_TOKEN")
+URL_CHAT = "http://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+URL_EMBEDDING = "http://aiproxy.sanand.workers.dev/openai/v1/embeddings"
 app = FastAPI()
 
 RUNNING_IN_CODESPACES = "CODESPACES" in os.environ
@@ -64,36 +63,25 @@ RUNNING_IN_DOCKER = os.path.exists("/.dockerenv")
 logging.basicConfig(level=logging.INFO)
 
 def ensure_local_path(path: str) -> str:
-    """Ensure the path uses './data/...' locally, but '/data/...' in Docker."""
-    if ((not RUNNING_IN_CODESPACES) and RUNNING_IN_DOCKER): 
-        print("IN HERE",RUNNING_IN_DOCKER) # If absolute Docker path, return as-is :  # If absolute Docker path, return as-is
-        return path
-    
-    else:
-        logging.info(f"Inside ensure_local_path with path: {path}")
-        return path.lstrip("/")  
+    return verify_path_location(path)
 
 function_mappings: Dict[str, Callable] = {
-    "install_and_run_script": install_and_run_script, 
-    "format_file_with_prettier": format_file_with_prettier,
-    "query_database": query_database, 
-    "extract_specific_text_using_llm": extract_specific_text_using_llm, 
-    "get_similar_text_using_embeddings": get_similar_text_using_embeddings, 
-    "extract_text_from_image": extract_text_from_image, 
-    "extract_specific_content_and_create_index": extract_specific_content_and_create_index, 
-    "process_and_write_logfiles": process_and_write_logfiles, 
-    "sort_json_by_keys": sort_json_by_keys, 
-    "count_occurrences": count_occurrences,
-    "clone_git_repo_and_commit": clone_git_repo_and_commit,
-    "scrape_webpage": scrape_webpage,
-    "convert_markdown_to_html": convert_markdown_to_html,
-    "filter_csv": filter_csv,
-    "transcribe_audio": transcribe_audio,
-    "compress_image": compress_image,
-    "run_sql_query_on_database": run_sql_query_on_database,
+    "deploy_script_package": deploy_script_package,
+    "beautify_code_file": beautify_code_file,
+    "execute_db_operation": execute_db_operation,
+    "process_text_with_ai": process_text_with_ai,
+    "compute_text_embeddings": compute_text_embeddings,
+    "extract_image_data": extract_image_data,
+    "build_content_index": build_content_index,
+    "parse_log_files": parse_log_files,
+    "sort_json_content": sort_json_content,
+    "analyze_text_patterns": analyze_text_patterns,
+    "handle_git_ops": handle_git_ops,
+    "scrape_web_content": scrape_web_content,
+    "convert_md_format": convert_md_format,
 }
 
-def parse_task_description(task_description: str,tools: list):
+def parse_task_description(task_description: str, tools: list):
     response = requests.post(
         URL_CHAT,
         headers={"Authorization": f"Bearer {API_KEY}",
@@ -111,10 +99,10 @@ def parse_task_description(task_description: str,tools: list):
                             "tools": tools,
                             "tool_choice":"required",
                 }
-                     )
-    logging.info("PRINTING RESPONSE:::"*3)
+    )
+    logging.info("TASK PARSING COMPLETED" * 3)
     print(response.json())
-    logging.info("PRINTING RESPONSE:::"*3)
+    logging.info("PARSER RESPONSE RECEIVED" * 3)
     return response.json()["choices"][0]["message"]
 
 
@@ -142,7 +130,7 @@ def execute_function_call(function_call):
 
 @app.post("/run")
 async def run_task(task: str = Query(..., description="Plain-English task description")):
-    tools = [convert_function_to_openai_schema(func) for func in function_mappings.values()]
+    tools = [transform_function_to_schema(func) for func in function_mappings.values()]
     logging.info(len(tools))
     logging.info(f"Inside run_task with task: {task}")
     try:
@@ -175,6 +163,4 @@ async def read_file(path: str = Query(..., description="Path to the file to read
 
 if __name__ == "__main__":
     import uvicorn
-    tools = [convert_function_to_openai_schema(count_occurrences), convert_function_to_openai_schema(query_database)] #REMOVE THIS LATER
-    print(tools)
-    uvicorn.run(app, host="127.0.0.1", port=8030)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
