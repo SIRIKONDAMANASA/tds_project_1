@@ -4,11 +4,11 @@ FROM python:3.12-slim
 # Set the working directory
 WORKDIR /
 
-# Copy the current directory contents into the container at /app
+# Copy the current directory contents into the container
 COPY . .
 
-# Install the required dependencies
-RUN pip install fastapi \
+# Install required dependencies
+RUN pip install --no-cache-dir fastapi \
     uvicorn \
     python-multipart \
     python-dotenv \
@@ -23,11 +23,10 @@ RUN pip install fastapi \
     python-dateutil \
     uv \
     duckdb \
-    Markdown \
-    
-RUN npm install -g prettier
+    Markdown
 
-
+# If you need Prettier, install Node.js before using npm
+RUN apt-get update && apt-get install -y nodejs npm && npm install -g prettier
 
 # Expose the port the app runs on
 EXPOSE 8000
